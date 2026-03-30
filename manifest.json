@@ -1,0 +1,8 @@
+{
+  "name": "pea3nut/scenario-test",
+  "assets": [
+    { "type": "skill", "source": "./skills/scenario-test" },
+    { "type": "command", "source": "./commands/exec-scenarios.md" },
+    { "type": "subAgent", "source": "./agents/scenario-case-runner.md" }
+  ]
+}
