@@ -1,209 +1,226 @@
 ---
 name: scenario-test-case
-description: 管理 Gherkin 测试用例资产。触发场景：添加新测试用例、更新已有用例、列出/过滤用例、读取用例内容、去重校验、查询 Gherkin 写法规范。所有用例以 .feature 文件形式存储，AI 直接读写文件系统。
+description: Manages Gherkin test case assets. Trigger scenarios: adding new test cases, updating existing cases, listing/filtering cases, reading case content, deduplication checks, querying Gherkin writing conventions. All cases are stored as .feature files; AI reads and writes the file system directly.
 user-invocable: false
 ---
 
 # Skill: scenario-test-case
 
-以 Gherkin `.feature` 文件管理测试用例资产。所有操作均直接操作文件系统，无代码依赖。
+Manages test case assets as Gherkin `.feature` files. All operations work directly on the file system with no code dependencies.
 
-## 目录约定
+## Directory Conventions
 
-**测试目录（`testDir`）推断规则**（按优先级）：
-1. 检查用户项目根目录的 `scenario-run-config.md` 中是否有 `testDir` 字段
-2. 嗅探项目根目录下的 `tests/`、`e2e/`、`test/` 目录（按此顺序，取第一个存在的）
-3. 以上均不存在则兜底使用 `tests/`
+**Test directory (`testDir`) inference rules** (by priority):
+1. Check if the user's project root `scenario-run-config.md` has a `testDir` field
+2. Detect `tests/`, `e2e/`, `test/` directories under the project root (in this order, use the first one found)
+3. If none of the above exist, fall back to `tests/`
 
-**用例存储路径**：`{testDir}/features/`（兜底：`tests/features/`）
+**Case storage path**: `{testDir}/features/` (fallback: `tests/features/`)
 
-**推荐目录结构**：
+**Recommended directory structure**:
 ```
 {testDir}/features/
 └── <domain>/
-    ├── ui/          # UI 场景（由 Playwright MCP 执行）
-    ├── api/         # API 场景（由 Bash curl 执行）
-    └── *.feature    # 混合或通用场景
+    ├── ui/          # UI scenarios (executed by Playwright MCP)
+    ├── api/         # API scenarios (executed by Bash curl)
+    └── *.feature    # Mixed or general scenarios
 ```
 
-## 能力说明
+## Capabilities
 
-### add_case — 添加测试用例
+### add_case — Add Test Case
 
-**触发**：用户提供 Gherkin 文本，要求添加到用例库。
+**Trigger**: User provides Gherkin text and requests it be added to the case library.
 
-**执行步骤**：
-1. 确定目标路径：
-   - 若用户指定了路径（`path` 参数），使用该路径（相对于 `{testDir}/features/`）
-   - 若未指定，根据用例内容推断：UI 相关放 `ui/`，API 相关放 `api/`，混合放根目录
-   - 文件名用 kebab-case，如 `search-product.feature`
-2. **去重检查**：扫描 `{testDir}/features/` 下所有 `.feature` 文件，检查是否已存在同路径同 Scenario 名称的用例（强去重）
-   - 若已存在：提示用户，询问是否覆盖更新，若是则执行 update_case
-   - 若不存在：直接创建文件
-3. 写入 `.feature` 文件，确保：
-   - 文件以 `Feature:` 开头
-   - 每个 Scenario 有清晰的 Given/When/Then 步骤
-   - 合理添加 tags（至少 `@P0` 或 `@P1` 优先级 tag）
-4. 告知用户文件写入路径
+**Execution steps**:
+1. Determine target path:
+   - If the user specified a path (`path` parameter), use that path (relative to `{testDir}/features/`)
+   - If not specified, infer from case content: UI-related goes to `ui/`, API-related goes to `api/`, mixed goes to root
+   - File names use kebab-case, e.g., `search-product.feature`
+2. **Check and generate `scenario-run-config.md`** (triggered on first case addition):
+   If `{testDir}/features/scenario-run-config.md` doesn't exist:
+   1. Copy from `{SKILL_DIR:scenario-test}/run-config-template.md` to `{testDir}/features/scenario-run-config.md` (create directory if it doesn't exist)
+   2. **Auto-infer executor configuration**, checking in this priority order:
+      - First check if the project already has a test framework (e.g., `package.json` contains vitest/jest/playwright/cypress dependencies, corresponding config files exist); if so, prefer reusing it, filling the corresponding CLI command into `executor.command`
+      - If the project has no existing test framework, determine from case content:
+        - Cases contain UI operations (page navigation, clicks, inputs, etc.) → `command: playwright-cli`
+        - Cases contain API requests (endpoints, status codes, response bodies, etc.) → `command: bash-curl`
+      - If a target address can be inferred from the project (e.g., dev script in `package.json`, URL in README), auto-fill `executor.config`
+   3. **Only ask the user when uncertain** (e.g., cannot determine executor type, cannot find target address); when asking, explain the executor concept:
+      > scenario-test uses "executors" to actually run test steps. Different executors correspond to different testing methods:
+      > - `playwright-cli`: Browser automation for Web UI testing (clicking, filling, screenshots, etc.)
+      > - `bash-curl`: HTTP requests for backend API testing
+      > - You can also use a custom CLI command (e.g., `vitest run`, `jest --ci`)
+      >
+      > Please provide: 1) Test target address; 2) Authentication method (if any)
+   4. Fill the inferred or user-provided information into the config file, inform the user that `scenario-run-config.md` has been generated with current settings, and can be modified at any time
+3. **Deduplication check**: Scan all `.feature` files under `{testDir}/features/`, check if a case with the same path and Scenario name already exists (strong dedup)
+   - If exists: Prompt the user, ask whether to overwrite; if yes, execute update_case
+   - If not exists: Create the file directly
+3. Write the `.feature` file, ensuring:
+   - File starts with `Feature:`
+   - Each Scenario has clear Given/When/Then steps
+   - Appropriately add tags (at least `@P0` or `@P1` priority tag)
+4. Inform the user of the file write path
 
-**示例（T706）**：
+**Example (T706)**:
 ```gherkin
-Feature: 商品搜索
+Feature: Product Search
 
   @P0 @web
-  Scenario: 搜索存在的商品
-    Given 用户已登录商品平台
-    When 用户在搜索框输入 "耳机"
-    Then 搜索结果列表中显示至少 1 条商品记录
+  Scenario: Search for existing product
+    Given the user is logged into the product platform
+    When the user types "headphones" in the search box
+    Then the search results list shows at least 1 product entry
 
   @P0 @api
-  Scenario: 搜索接口返回商品列表
-    Given 商品搜索接口 GET /api/products/search 可访问
-    When 请求参数包含 keyword="耳机"
-    Then 响应状态码为 200
-    And 响应体的 data.list 数组长度大于 0
+  Scenario: Search API returns product list
+    Given the product search API GET /api/products/search is accessible
+    When the request parameters include keyword="headphones"
+    Then the response status code is 200
+    And the response body's data.list array length is greater than 0
 ```
 
 ---
 
-### update_case — 更新测试用例
+### update_case — Update Test Case
 
-**触发**：用户要求修改已有用例内容。
+**Trigger**: User requests modification of an existing case.
 
-**执行步骤**：
-1. 定位目标文件：
-   - 若用户提供了路径，直接定位
-   - 若提供了 Scenario 名称，在 `{testDir}/features/` 下递归搜索匹配的 Scenario
-2. 读取原文件内容
-3. 在文件中找到目标 Scenario（按名称匹配），用新内容替换该 Scenario 块
-   - 若目标是整个 Feature 文件，则替换整个文件
-   - 若只更新某个 Scenario，保留文件中其他 Scenario 不变
-4. 写回文件
-5. 报告变更内容（diff 形式）
+**Execution steps**:
+1. Locate the target file:
+   - If the user provided a path, locate directly
+   - If a Scenario name was provided, recursively search under `{testDir}/features/` for the matching Scenario
+2. Read the original file content
+3. Find the target Scenario in the file (match by name), replace that Scenario block with new content
+   - If the target is the entire Feature file, replace the whole file
+   - If only updating a specific Scenario, preserve other Scenarios in the file
+4. Write back to file
+5. Report the changes (in diff format)
 
-**去重规则（更新时）**：
-- 同一路径、同一 Scenario 名称：覆盖更新（不创建副本）
-- 不同路径、相同 Scenario 名称：视为独立用例，不自动合并（提示用户注意潜在重复）
+**Deduplication rules (during update)**:
+- Same path, same Scenario name: Overwrite update (don't create a copy)
+- Different path, same Scenario name: Treat as independent cases, don't auto-merge (prompt user about potential duplication)
 
-**弱去重策略（T905）**：
+**Weak deduplication strategy (T905)**:
 
-当强去重（路径+名称完全匹配）未命中时，执行弱去重检测，以避免语义重复的用例：
+When strong dedup (exact path + name match) doesn't hit, perform weak dedup detection to avoid semantically duplicate cases:
 
-1. **Canonical Hash 计算**：对每个 Scenario 计算规范化哈希
-   - 步骤：去除多余空白 → 将步骤关键字（Given/When/Then/And/But）统一转为小写 → 对 Scenario 标题和每个步骤文本分别 trim → 拼接后取哈希前 8 位
-   - 示例：`"搜索存在的商品"` + `"given 用户已登录商品平台"` + `"when 用户在搜索框输入"` + `"then 搜索结果显示"` → 哈希 `a3f9d2b1`
+1. **Canonical Hash Calculation**: Calculate a normalized hash for each Scenario
+   - Steps: Remove excess whitespace → Convert step keywords (Given/When/Then/And/But) to lowercase → Trim Scenario title and each step text → Concatenate and take first 8 characters of hash
+   - Example: `"Search for existing product"` + `"given the user is logged into the product platform"` + `"when the user types in the search box"` + `"then search results show"` → hash `a3f9d2b1`
 
-2. **弱重复检测**：若 canonical hash 与已有用例相同，但路径或名称不同：
-   - 提示用户检测到疑似重复用例，展示两者的差异
-   - 询问用户：覆盖原有用例 / 保留为新用例 / 生成冲突文件
-   - 若用户选择生成冲突文件：将新用例保存为 `<原文件名>.conflict.feature`，不修改原文件
-
----
-
-### list_cases — 列出测试用例
-
-**触发**：用户要求查看、搜索、过滤用例。
-
-**执行步骤**：
-1. 递归扫描 `{testDir}/features/` 下所有 `.feature` 文件
-2. **识别和提取 Scenario tags（T704）**：
-   - 每个 `.feature` 文件中，tags 行紧接在 `Scenario:` 关键字的前一行，以 `@` 开头，多个 tag 用空格分隔
-   - 示例：`  @P0 @web @smoke` → tags 为 `["@P0", "@web", "@smoke"]`
-   - Feature 级别的 tags（在 `Feature:` 前）会被所有 Scenario 继承
-   - 提取时注意缩进，tags 行通常有 2 空格缩进
-3. 按过滤条件筛选：
-   - **按目录**：只返回指定子目录下的用例
-   - **按 tags**：支持 `@P0`、`@P0 and @web`、`@P0 or @api`、`not @skip` 等语法
-   - **按关键字**：在 Feature 名称和 Scenario 名称中搜索关键字
-4. 以表格或列表形式输出结果：
-   - 文件路径、Feature 名称、Scenario 名称、tags、最后修改时间
-
-**tags 过滤语法**：
-- `@P0`：仅含此 tag
-- `@P0 and @web`：同时含两个 tag（AND）
-- `@P0 or @api`：含其中任一 tag（OR）
-- `not @skip`：不含此 tag（NOT）
-- 组合：`@P0 and (@web or @api)`
+2. **Weak duplicate detection**: If canonical hash matches an existing case but path or name differs:
+   - Prompt user about suspected duplicate case, show differences between the two
+   - Ask user: Overwrite existing case / Keep as new case / Generate conflict file
+   - If user chooses to generate conflict file: Save new case as `<original-filename>.conflict.feature`, don't modify the original file
 
 ---
 
-### get_case — 读取单个用例
+### list_cases — List Test Cases
 
-**触发**：用户要求查看某个用例的完整内容。
+**Trigger**: User requests to view, search, or filter cases.
 
-**执行步骤**：
-1. 定位文件：
-   - 若提供路径，直接读取
-   - 若提供 Scenario 名称，在 `{testDir}/features/` 下递归搜索
-2. 以代码块形式展示 `.feature` 文件内容
-3. 同时展示：文件路径、tags、步骤数量
+**Execution steps**:
+1. Recursively scan all `.feature` files under `{testDir}/features/`
+2. **Identify and extract Scenario tags (T704)**:
+   - In each `.feature` file, the tags line immediately precedes the `Scenario:` keyword, starts with `@`, multiple tags separated by spaces
+   - Example: `  @P0 @web @smoke` → tags are `["@P0", "@web", "@smoke"]`
+   - Feature-level tags (before `Feature:`) are inherited by all Scenarios
+   - Note indentation when extracting; tags lines typically have 2-space indentation
+3. Filter by conditions:
+   - **By directory**: Return only cases under a specified subdirectory
+   - **By tags**: Supports `@P0`, `@P0 and @web`, `@P0 or @api`, `not @skip`, etc.
+   - **By keyword**: Search in Feature names and Scenario names
+4. Output results in table or list format:
+   - File path, Feature name, Scenario name, tags, last modified time
+
+**Tags filter syntax**:
+- `@P0`: Contains only this tag
+- `@P0 and @web`: Contains both tags (AND)
+- `@P0 or @api`: Contains either tag (OR)
+- `not @skip`: Does not contain this tag (NOT)
+- Combination: `@P0 and (@web or @api)`
 
 ---
 
-### explain_how_to_write — 用例编写规范说明
+### get_case — Read Single Case
 
-**触发**：用户不熟悉 Gherkin、询问用例写法、需要示例。
+**Trigger**: User requests to view the full content of a case.
 
-**输出以下内容**：
+**Execution steps**:
+1. Locate the file:
+   - If a path is provided, read directly
+   - If a Scenario name is provided, recursively search under `{testDir}/features/`
+2. Display `.feature` file content in a code block
+3. Also display: file path, tags, step count
 
-#### Gherkin 基础语法
+---
 
-遵循 [Cucumber Gherkin 官方规范](https://cucumber.io/docs/gherkin/)。
+### explain_how_to_write — Case Writing Guidelines
 
-**文件结构**：
+**Trigger**: User is unfamiliar with Gherkin, asks about writing conventions, or needs examples.
+
+**Output the following content**:
+
+#### Gherkin Basic Syntax
+
+Follows the [Cucumber Gherkin official specification](https://cucumber.io/docs/gherkin/).
+
+**File structure**:
 ```gherkin
-Feature: 功能模块名称（简短描述）
+Feature: Module name (brief description)
 
-  Background:                     # 可选：每个 Scenario 的公共前置条件
-    Given 用户已登录系统
+  Background:                     # Optional: Shared preconditions for each Scenario
+    Given the user is logged in
 
-  @P0 @web                        # Tags：优先级 + 分类
-  Scenario: 场景描述（描述行为，不写实现细节）
-    Given 前置条件（系统当前状态）
-    When 用户执行的操作（单一动作）
-    Then 期望的可观测结果（断言）
-    And 附加结果（可选，继续 Then 的逻辑）
-    But 例外情况（可选，表示 NOT）
+  @P0 @web                        # Tags: priority + category
+  Scenario: Scenario description (describe behavior, not implementation details)
+    Given precondition (current system state)
+    When user action (single action)
+    Then expected observable result (assertion)
+    And additional result (optional, continues Then logic)
+    But exception case (optional, means NOT)
 ```
 
-**编写原则**：
-- **一个 Scenario 只测一件事**，步骤数建议 3-7 步
-- **Given**：描述系统初始状态，不是用户操作
-- **When**：描述用户触发的单一行为
-- **Then**：描述可观测的断言结果（UI 变化、API 响应等）
-- **步骤描述要具体**，例如用 `"耳机"` 而非 `有效关键词`
+**Writing principles**:
+- **One Scenario tests one thing**, recommended 3-7 steps
+- **Given**: Describes the initial system state, not user actions
+- **When**: Describes the single behavior triggered by the user
+- **Then**: Describes the observable assertion result (UI change, API response, etc.)
+- **Step descriptions should be specific**, e.g., use `"headphones"` not `valid keyword`
 
-**Tags 约定**：
-- 优先级：`@P0`（必测）、`@P1`（高频）、`@P2`（扩展）
-- 类型：`@web`（UI）、`@api`（接口）、`@smoke`（冒烟）
-- 状态：`@skip`（暂跳过）、`@flaky`（不稳定）
+**Tags conventions**:
+- Priority: `@P0` (must test), `@P1` (high frequency), `@P2` (extended)
+- Type: `@web` (UI), `@api` (endpoint), `@smoke` (smoke test)
+- Status: `@skip` (temporarily skipped), `@flaky` (unstable)
 
-**完整示例**：
+**Complete example**:
 ```gherkin
-Feature: 用户登录
+Feature: User Login
 
   @P0 @web @smoke
-  Scenario: 正确账号密码登录成功
-    Given 用户在登录页面
-    When 用户输入正确的账号 "test@example.com" 和密码 "password123"
-    And 用户点击登录按钮
-    Then 页面跳转到首页
-    And 顶部导航栏显示用户头像
+  Scenario: Successful login with correct credentials
+    Given the user is on the login page
+    When the user enters correct email "test@example.com" and password "password123"
+    And the user clicks the login button
+    Then the page redirects to the homepage
+    And the top navigation bar displays the user avatar
 
   @P0 @web
-  Scenario: 错误密码登录失败提示
-    Given 用户在登录页面
-    When 用户输入账号 "test@example.com" 和错误密码 "wrong"
-    And 用户点击登录按钮
-    Then 页面显示错误提示 "密码错误"
-    And 页面停留在登录页
+  Scenario: Failed login shows error message
+    Given the user is on the login page
+    When the user enters email "test@example.com" and wrong password "wrong"
+    And the user clicks the login button
+    Then the page displays error message "Incorrect password"
+    And the page remains on the login page
 
   @P1 @api
-  Scenario: 登录接口返回正确 Token
-    Given 登录接口 POST /api/auth/login 可访问
-    When 请求体包含正确的 username 和 password
-    Then 响应状态码为 200
-    And 响应体包含 token 字段
+  Scenario: Login API returns correct token
+    Given the login API POST /api/auth/login is accessible
+    When the request body contains correct username and password
+    Then the response status code is 200
+    And the response body contains a token field
 ```
 
-**官方文档**：https://cucumber.io/docs/gherkin/
+**Official documentation**: https://cucumber.io/docs/gherkin/
