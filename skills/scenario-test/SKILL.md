@@ -1,6 +1,6 @@
 ---
 name: scenario-test-case
-description: Manages Gherkin test case assets. Trigger scenarios: adding new test cases, updating existing cases, listing/filtering cases, reading case content, deduplication checks, querying Gherkin writing conventions. All cases are stored as .feature files; AI reads and writes the file system directly.
+description: "Generates and manages behavior-level Gherkin test cases. Trigger scenarios: generating cases from requirements or existing behavior, adding or updating cases, listing/filtering cases, reading case content, deduplication checks, querying Gherkin writing conventions. All cases are stored as .feature files; AI reads and writes the file system directly."
 user-invocable: false
 ---
 
@@ -61,6 +61,7 @@ Manages test case assets as Gherkin `.feature` files. All operations work direct
    - File starts with `Feature:`
    - Each Scenario has clear Given/When/Then steps
    - Appropriately add tags (at least `@P0` or `@P1` priority tag)
+   - When generating or substantively revising cases, apply the relevant guidance in [Case Design Quality](#case-design-quality); preserve user-supplied business rules and mark undefined expectations for clarification rather than inventing them
 4. Inform the user of the file write path
 
 **Example (T706)**:
@@ -95,6 +96,7 @@ Feature: Product Search
 3. Find the target Scenario in the file (match by name), replace that Scenario block with new content
    - If the target is the entire Feature file, replace the whole file
    - If only updating a specific Scenario, preserve other Scenarios in the file
+   - Apply [Case Design Quality](#case-design-quality) to generated revisions without silently changing the requested business behavior
 4. Write back to file
 5. Report the changes (in diff format)
 
@@ -188,7 +190,16 @@ Feature: Module name (brief description)
 - **Given**: Describes the initial system state, not user actions
 - **When**: Describes the single behavior triggered by the user
 - **Then**: Describes the observable assertion result (UI change, API response, etc.)
-- **Step descriptions should be specific**, e.g., use `"headphones"` not `valid keyword`
+- **Make business inputs and outcomes specific**, e.g., use `"headphones"` not `valid keyword`; keep routine request formatting, selectors, and storage details in executor configuration or project execution notes
+
+#### Case Design Quality
+
+When generating or substantively revising cases, use the relevant sections of [case-design-guide.md](case-design-guide.md) to choose representative inputs, independent expected results, valid negative cases, and observable asynchronous ordering.
+
+- State the business relationship to preserve, such as returned values matching the user's selected inputs.
+- Include fixed examples that distinguish the intended behavior from a plausible incorrect default. Reproducible generated data may supplement those examples.
+- Keep scenario text focused on business behavior. Record concrete fixtures, required variants, and timing controls in the project's existing execution configuration or notes when needed; do not add a mandatory file or testing dependency.
+- If a necessary business rule or execution capability is unknown, record the unresolved requirement. Writing a case does not establish that its fixtures or timing controls have been implemented or executed.
 
 **Tags conventions**:
 - Priority: `@P0` (must test), `@P1` (high frequency), `@P2` (extended)
